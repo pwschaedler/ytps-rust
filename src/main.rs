@@ -17,6 +17,6 @@ enum Commands {
 fn main() {
     let args = Args::parse();
     match args.command {
-        Commands::Login => login::login(),
+        Commands::Login => login::execute(),
     }
 }
