@@ -1,22 +1,34 @@
 pub mod login {
-    use google_youtube3::{FieldMask, YouTube, hyper_rustls, hyper_util, yup_oauth2};
+    use anyhow::Result;
+    use google_youtube3::{YouTube, hyper_rustls, hyper_util, yup_oauth2};
+
     use thiserror::Error;
+    use tokio::runtime;
+
+    const _CLIENT_ID: &str =
+        "565952211844-5t5nqju0v5oj4rvboght0kqrqv38de65.apps.googleusercontent.com";
 
     #[derive(Error, Debug)]
     pub enum LoginError {
         #[error("Could not detect valid TLS certs")]
         InvalidCertsError,
+
+        #[error("Could not authenticate using OAuth flow")]
+        AuthenticationError,
     }
 
     /// Login using Google OAuth to enable actions on user data.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if login flow fails.
-    pub fn execute() {
+    /// Returns an error if login flow fails.
+    pub fn execute() -> Result<()> {
         println!("Logging in!");
-        let login_res = request_login();
-        assert!(login_res.is_ok(), "Unable to login.");
+        let async_rt = runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        async_rt.block_on(request_login())?;
+        Ok(())
     }
 
     /// Request login flow using OAuth.
@@ -27,7 +39,7 @@ pub mod login {
     /// # Errors
     ///
     /// Returns a `LoginError` when an HTTPS connection cannot be made.
-    fn request_login() -> Result<(), LoginError> {
+    async fn request_login() -> Result<(), LoginError> {
         let secret = yup_oauth2::ApplicationSecret::default();
         let connector = hyper_rustls::HttpsConnectorBuilder::new()
             .with_native_roots()
@@ -37,6 +49,7 @@ pub mod login {
             .build();
 
         let executor = hyper_util::rt::TokioExecutor::new();
+        // Why legacy client here?
         let auth = yup_oauth2::InstalledFlowAuthenticator::with_client(
             secret,
             yup_oauth2::InstalledFlowReturnMethod::HTTPRedirect,
@@ -44,13 +57,30 @@ pub mod login {
                 hyper_util::client::legacy::Client::builder(executor).build(connector),
             ),
         )
-        .build(); // TODO .await.unwrap();
-        // Some questions here:
-        // 1. Why legacy client?
-        // 2. Need to make this async so I can await.
+        .build()
+        .await
+        .map_err(|_| LoginError::AuthenticationError)?;
 
-        // There's more to do here too.
-        // https://docs.rs/google-youtube3/latest/google_youtube3/index.html
+        let client =
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                .build(
+                    hyper_rustls::HttpsConnectorBuilder::new()
+                        .with_native_roots()
+                        .map_err(|_| LoginError::InvalidCertsError)?
+                        .https_or_http()
+                        .enable_all_versions()
+                        .build(),
+                );
+
+        // Sample functionality using login
+        let hub = YouTube::new(client, auth);
+        let _result = hub.videos().list(&vec!["status".into()]).doit().await; // TODO Need to do something here
+
+        // Here the console writes a URI segment to authenticate. Prepend:
+        // https://accounts.google.com/o/oauth2/v2/auth
+        // Append client ID.
+        // How do we do this for the user? Open browser, grab that URL, and eventually save a token
+        // or something to keep logged in.
 
         Ok(())
     }

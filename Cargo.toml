@@ -5,9 +5,11 @@ edition = "2024"
 description = "A YouTube playlist search tool."
 
 [dependencies]
+anyhow = "1.0.104"
 clap = { version = "4.6.5", features = ["derive"] }
 google-youtube3 = "7.0.0"
 thiserror = "2.0.21"
+tokio = { version = "1.53.1", features = ["full"] }
 
 # Borrowed from https://www.namtao.com/rust/
 [lints.clippy]
