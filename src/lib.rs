@@ -75,3 +75,18 @@ pub mod login {
         }
     }
 }
+
+pub mod refresh {
+    use anyhow::Result;
+
+    /// Refresh cached playlist items.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if playlist items could not be fetched.
+    pub const fn execute() -> Result<()> {
+        // Need to take an argument for playlist ID/name. Idea: make the argument optional and if
+        // none is provided, it uses the last seen (based off cached value).
+        Ok(())
+    }
+}

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use ytps_rust::login;
+use ytps_rust::{login, refresh};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -17,12 +17,16 @@ enum Commands {
         /// Path to JSON client secret from Google Cloud Console
         client_secret: PathBuf,
     },
+
+    /// Refresh cached playlist items
+    Refresh,
 }
 
 fn main() {
     let args = Args::parse();
     let res = match args.command {
         Commands::Login { client_secret } => login::execute(client_secret),
+        Commands::Refresh => refresh::execute(),
     };
     if let Err(err) = res {
         eprintln!("Error: {err}");
