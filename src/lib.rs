@@ -1,17 +1,21 @@
 pub mod login {
+    use std::fs;
+    use std::path::PathBuf;
+
     use anyhow::Result;
-    use google_youtube3::{YouTube, hyper_rustls, hyper_util, yup_oauth2};
+    use yup_oauth2;
+    use yup_oauth2::{InstalledFlowAuthenticator, InstalledFlowReturnMethod};
 
     use thiserror::Error;
     use tokio::runtime;
 
-    const _CLIENT_ID: &str =
-        "565952211844-5t5nqju0v5oj4rvboght0kqrqv38de65.apps.googleusercontent.com";
-
     #[derive(Error, Debug)]
     pub enum LoginError {
-        #[error("Could not detect valid TLS certs")]
-        InvalidCertsError,
+        #[error("Token cache directory could not be used")]
+        TokenCacheError,
+
+        #[error("Could not use provided JSON client secret to login")]
+        BadClientSecretError,
 
         #[error("Could not authenticate using OAuth flow")]
         AuthenticationError,
@@ -22,12 +26,11 @@ pub mod login {
     /// # Errors
     ///
     /// Returns an error if login flow fails.
-    pub fn execute() -> Result<()> {
-        println!("Logging in!");
+    pub fn execute(client_secret: PathBuf) -> Result<()> {
         let async_rt = runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
-        async_rt.block_on(request_login())?;
+        async_rt.block_on(request_login(client_secret))?;
         Ok(())
     }
 
@@ -39,49 +42,36 @@ pub mod login {
     /// # Errors
     ///
     /// Returns a `LoginError` when an HTTPS connection cannot be made.
-    async fn request_login() -> Result<(), LoginError> {
-        let secret = yup_oauth2::ApplicationSecret::default();
-        let connector = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_native_roots()
-            .map_err(|_| LoginError::InvalidCertsError)?
-            .https_only()
-            .enable_all_versions()
-            .build();
+    async fn request_login(client_secret: PathBuf) -> Result<(), LoginError> {
+        let project_dir = directories::ProjectDirs::from("com.github", "pwschaedler", "ytps")
+            .ok_or(LoginError::TokenCacheError)?;
+        fs::create_dir_all(project_dir.cache_dir()).map_err(|_| LoginError::TokenCacheError)?;
+        let token_cache_path = project_dir.cache_dir().join("token_cache.json");
 
-        let executor = hyper_util::rt::TokioExecutor::new();
-        // Why legacy client here?
-        let auth = yup_oauth2::InstalledFlowAuthenticator::with_client(
-            secret,
-            yup_oauth2::InstalledFlowReturnMethod::HTTPRedirect,
-            yup_oauth2::client::CustomHyperClientBuilder::from(
-                hyper_util::client::legacy::Client::builder(executor).build(connector),
-            ),
-        )
-        .build()
-        .await
-        .map_err(|_| LoginError::AuthenticationError)?;
+        // The actual secret file is only necessary for initial login. Once we have the initial
+        // token, it's no longer necessary.
+        let secret = yup_oauth2::read_application_secret(client_secret)
+            .await
+            .map_err(|_| LoginError::BadClientSecretError)?;
 
-        let client =
-            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-                .build(
-                    hyper_rustls::HttpsConnectorBuilder::new()
-                        .with_native_roots()
-                        .map_err(|_| LoginError::InvalidCertsError)?
-                        .https_or_http()
-                        .enable_all_versions()
-                        .build(),
-                );
+        // Authenticator takes care of caching tokens, reading when available, and refreshing
+        // when necessary.
+        let auth =
+            InstalledFlowAuthenticator::builder(secret, InstalledFlowReturnMethod::HTTPRedirect)
+                .persist_tokens_to_disk(token_cache_path)
+                .build()
+                .await
+                .map_err(|_| LoginError::AuthenticationError)?;
+        let scopes = &["https://www.googleapis.com/auth/youtube.readonly"];
 
-        // Sample functionality using login
-        let hub = YouTube::new(client, auth);
-        let _result = hub.videos().list(&vec!["status".into()]).doit().await; // TODO Need to do something here
-
-        // Here the console writes a URI segment to authenticate. Prepend:
-        // https://accounts.google.com/o/oauth2/v2/auth
-        // Append client ID.
-        // How do we do this for the user? Open browser, grab that URL, and eventually save a token
-        // or something to keep logged in.
-
-        Ok(())
+        // Actual login flow happens here.
+        let token = auth.token(scopes).await;
+        match token {
+            Ok(_) => {
+                eprintln!("Login successful.");
+                Ok(())
+            }
+            Err(_) => Err(LoginError::AuthenticationError),
+        }
     }
 }
