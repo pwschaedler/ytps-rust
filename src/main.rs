@@ -22,11 +22,12 @@ enum Commands {
     Refresh,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = Args::parse();
     let res = match args.command {
-        Commands::Login { client_secret } => login::execute(client_secret),
-        Commands::Refresh => refresh::execute(),
+        Commands::Login { client_secret } => login::execute(client_secret).await,
+        Commands::Refresh => refresh::execute().await,
     };
     if let Err(err) = res {
         eprintln!("Error: {err}");
